@@ -250,7 +250,7 @@ def get_broadcast_wait():
 async def notify_admins(application, text, only_first=True):
     for admin_id in ADMIN_USER_IDS:
         try:
-            await application.bot.send_message(admin_id, text, parse_mode=ParseMode.MARKDOWN)
+            await application.bot.send_message(admin_id, text, parse_mode=ParseMode.HTML)
             if only_first:
                 break
         except Exception as e:
@@ -571,7 +571,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         admin_tag = " <i>[админ]</i>" if cmd["admin"] else ""
         text += f"{cmd['cmd']}: {cmd['desc']}{admin_tag}\n"
     text += HELP_USAGE
-    await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
 async def set_bot_commands(application):
     commands = [
@@ -606,9 +606,9 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     if hasattr(update, "message") and update.message:
-        await update.message.reply_text("Админ-панель:", reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text("Админ-панель:", reply_markup=reply_markup, parse_mode=ParseMode.HTML)
     elif hasattr(update, "callback_query") and update.callback_query:
-        await update.callback_query.edit_message_text("Админ-панель:", reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        await update.callback_query.edit_message_text("Админ-панель:", reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
 @admin_only
 async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -630,7 +630,7 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard = [
                 [InlineKeyboardButton("Показать всех", callback_data="admin:allusers")]
             ]
-        await query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard) if keyboard else None)
+        await query.edit_message_text(msg, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(keyboard) if keyboard else None)
 
     elif data == "admin:allusers":
         stats = collect_history_stats(min_messages=1)
@@ -640,12 +640,12 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             msg = "Все активные пользователи:\n"
             for i, (uid, msg_count) in enumerate(stats, 1):
                 msg += f"{i}) <code>{uid}</code>: сообщений {msg_count}\n"
-        await query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN)
+        await query.edit_message_text(msg, parse_mode=ParseMode.HTML)
 
     elif data == "admin:logs":
         logs = get_last_logs()
         await query.edit_message_text(
-            f"<b>Последние логи:</b>\n<pre>{logs}</pre>", parse_mode=ParseMode.MARKDOWN
+            f"<b>Последние логи:</b>\n<pre>{logs}</pre>", parse_mode=ParseMode.HTML
         )
     elif data == "admin:defmodel":
         current = get_default_model()
@@ -655,7 +655,7 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for m in models
         ]
         await query.edit_message_text(
-            f"Модель по умолчанию: <b>{current}</b>\n\nВыбери новую:", parse_mode=ParseMode.MARKDOWN,
+            f"Модель по умолчанию: <b>{current}</b>\n\nВыбери новую:", parse_mode=ParseMode.HTML,
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
     elif data.startswith("admin:setdefmodel:"):
@@ -668,7 +668,7 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     set_broadcast_wait(update.effective_user.id)
     await update.message.reply_text(
-        "Введите сообщение для рассылки всем пользователям (или /cancel для отмены).", parse_mode=ParseMode.MARKDOWN
+        "Введите сообщение для рассылки всем пользователям (или /cancel для отмены).", parse_mode=ParseMode.HTML
     )
 
 @admin_only
@@ -676,9 +676,9 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     waiting_admin = get_broadcast_wait()
     if waiting_admin == update.effective_user.id:
         clear_broadcast_wait()
-        await update.message.reply_text("Режим рассылки отменён.", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text("Режим рассылки отменён.", parse_mode=ParseMode.HTML)
     else:
-        await update.message.reply_text("Нет активного режима рассылки.", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text("Нет активного режима рассылки.", parse_mode=ParseMode.HTML)
 
 @allowed_only
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -691,7 +691,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Готовы продолжать диалог или начать новый вопрос.\n\n"
             "— Для справки и описания возможностей используйте команду /help."
         )
-    await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
 @allowed_only
 async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -710,20 +710,20 @@ async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "…или просто начни диалог!\n"
         "Можно отправлять фотографии и голосовые сообщения."
     )
-    await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
 @allowed_only
 async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     reset_history(user_id)
-    await update.message.reply_text("История диалога очищена. Можно начать новый разговор!", parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text("История диалога очищена. Можно начать новый разговор!", parse_mode=ParseMode.HTML)
 
 @allowed_only
 async def export_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     history = get_user_history(user_id)
     if not history:
-        await update.message.reply_text("У вас пока нет истории сообщений.", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text("У вас пока нет истории сообщений.", parse_mode=ParseMode.HTML)
         return
 
     lines = []
@@ -779,7 +779,7 @@ async def model_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ][:TOP_MODELS_LIMIT]
 
     if not models_to_show:
-        await update.message.reply_text("Нет доступных моделей для выбора.", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text("Нет доступных моделей для выбора.", parse_mode=ParseMode.HTML)
         return
     keyboard = [
         [InlineKeyboardButton(
@@ -794,9 +794,9 @@ async def model_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text += f"\nТекущая модель: {current}"
     reply_markup = InlineKeyboardMarkup(keyboard)
     if hasattr(update, "message") and update.message:
-        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
     elif hasattr(update, "callback_query") and update.callback_query:
-        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
 @allowed_only
 async def model_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -826,9 +826,9 @@ async def model_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def reloadmodels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     res = await reload_models()
     if res:
-        await update.message.reply_text("Список моделей успешно обновлён.", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text("Список моделей успешно обновлён.", parse_mode=ParseMode.HTML)
     else:
-        await update.message.reply_text("Не удалось обновить список моделей.", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text("Не удалось обновить список моделей.", parse_mode=ParseMode.HTML)
 
 @admin_only
 async def admin_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
