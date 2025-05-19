@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>LLM Chat</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>LLM Chat</h1>
+        <form method="POST" action="/" enctype="multipart/form-data">
+            <textarea name="message" placeholder="Введите сообщение..." required></textarea>
+            <button type="submit">Отправить</button>
+            <input type="file" name="file">
+        </form>
+        <form method="POST" action="/set_model">
+            <select name="model">
+                {% for m in models %}
+                    <option value="{{ m }}" {% if m == model %}selected{% endif %}>{{ m }}</option>
+                {% endfor %}
+            </select>
+            <button type="submit">Сменить модель</button>
+        </form>
+        <a href="/reset">Очистить диалог</a> | <a href="/export">Экспорт истории</a>
+        {% if is_admin %}| <a href="/admin">Админ-панель</a>{% endif %}
+        <hr>
+        <div class="chat-history">
+        {% for msg in history %}
+            <div class="msg {{ 'user' if msg.role == 'user' else 'assistant' }}">
+                <b>{{ 'Вы' if msg.role == 'user' else 'Бот' }}:</b>
+                {% if msg.content is string %}
+                    <div>{{ msg.content|safe }}</div>
+                {% else %}
+                    {% for part in msg.content %}
+                        {% if part.type == "text" %}
+                            <div>{{ part.text|safe }}</div>
+                        {% elif part.type == "image_url" %}
+                            <img src="{{ part.image_url.url }}">
+                        {% endif %}
+                    {% endfor %}
+                {% endif %}
+            </div>
+        {% endfor %}
+        </div>
+        <a href="/logout">Выйти</a>
+    </div>
+</body>
+</html>

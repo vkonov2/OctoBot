@@ -1,0 +1,59 @@
+[2025-05-18 23:37:41,411] INFO:werkzeug:_internal.py:97: [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5001
+ * Running on http://10.102.37.150:5001
+[2025-05-18 23:37:41,412] INFO:werkzeug:_internal.py:97: [33mPress CTRL+C to quit[0m
+[2025-05-18 23:37:41,412] INFO:werkzeug:_internal.py:97:  * Restarting with stat
+[2025-05-18 23:37:43,024] WARNING:werkzeug:_internal.py:97:  * Debugger is active!
+[2025-05-18 23:37:43,032] INFO:werkzeug:_internal.py:97:  * Debugger PIN: 385-766-320
+[2025-05-18 23:38:44,829] INFO:werkzeug:_internal.py:97:  * Detected change in '/Users/konov/projects/OctoBot/app.py', reloading
+[2025-05-18 23:38:44,895] INFO:werkzeug:_internal.py:97:  * Restarting with stat
+[2025-05-18 23:38:46,556] WARNING:werkzeug:_internal.py:97:  * Debugger is active!
+[2025-05-18 23:38:46,564] INFO:werkzeug:_internal.py:97:  * Debugger PIN: 385-766-320
+[2025-05-18 23:40:30,340] INFO:werkzeug:_internal.py:97: [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5001
+ * Running on http://10.102.37.150:5001
+[2025-05-18 23:40:30,340] INFO:werkzeug:_internal.py:97: [33mPress CTRL+C to quit[0m
+[2025-05-18 23:40:30,340] INFO:werkzeug:_internal.py:97:  * Restarting with stat
+[2025-05-18 23:40:31,909] WARNING:werkzeug:_internal.py:97:  * Debugger is active!
+[2025-05-18 23:40:31,918] INFO:werkzeug:_internal.py:97:  * Debugger PIN: 385-766-320
+[2025-05-18 23:41:28,445] INFO:werkzeug:_internal.py:97: [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5001
+ * Running on http://10.102.37.150:5001
+[2025-05-18 23:41:28,446] INFO:werkzeug:_internal.py:97: [33mPress CTRL+C to quit[0m
+[2025-05-18 23:41:28,446] INFO:werkzeug:_internal.py:97:  * Restarting with stat
+[2025-05-18 23:41:30,104] WARNING:werkzeug:_internal.py:97:  * Debugger is active!
+[2025-05-18 23:41:30,113] INFO:werkzeug:_internal.py:97:  * Debugger PIN: 385-766-320
+[2025-05-18 23:46:52,412] INFO:werkzeug:_internal.py:97: [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5001
+ * Running on http://10.102.37.150:5001
+[2025-05-18 23:46:52,412] INFO:werkzeug:_internal.py:97: [33mPress CTRL+C to quit[0m
+[2025-05-18 23:46:52,413] INFO:werkzeug:_internal.py:97:  * Restarting with stat
+[2025-05-18 23:46:52,717] WARNING:werkzeug:_internal.py:97:  * Debugger is active!
+[2025-05-18 23:46:52,720] INFO:werkzeug:_internal.py:97:  * Debugger PIN: 385-766-320
+[2025-05-18 23:48:35,802] INFO:werkzeug:_internal.py:97: [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5001
+[2025-05-18 23:48:35,802] INFO:werkzeug:_internal.py:97: [33mPress CTRL+C to quit[0m
+[2025-05-18 23:48:35,802] INFO:werkzeug:_internal.py:97:  * Restarting with stat
+[2025-05-18 23:48:36,106] WARNING:werkzeug:_internal.py:97:  * Debugger is active!
+[2025-05-18 23:48:36,110] INFO:werkzeug:_internal.py:97:  * Debugger PIN: 385-766-320
+[2025-05-18 23:48:43,979] INFO:werkzeug:_internal.py:97: 127.0.0.1 - - [18/May/2025 23:48:43] "[32mGET / HTTP/1.1[0m" 302 -
+[2025-05-18 23:48:44,869] INFO:werkzeug:_internal.py:97: 127.0.0.1 - - [18/May/2025 23:48:44] "GET /login HTTP/1.1" 200 -
+[2025-05-18 23:48:46,644] INFO:werkzeug:_internal.py:97: 127.0.0.1 - - [18/May/2025 23:48:46] "GET /static/style.css HTTP/1.1" 200 -
+[2025-05-18 23:48:49,507] INFO:werkzeug:_internal.py:97: 127.0.0.1 - - [18/May/2025 23:48:49] "[32mGET / HTTP/1.1[0m" 302 -
+[2025-05-18 23:48:50,533] INFO:werkzeug:_internal.py:97: 127.0.0.1 - - [18/May/2025 23:48:50] "GET /login HTTP/1.1" 200 -
+[2025-05-18 23:48:51,556] INFO:werkzeug:_internal.py:97: 127.0.0.1 - - [18/May/2025 23:48:51] "GET /static/style.css HTTP/1.1" 200 -
+[2025-05-18 23:48:52,376] INFO:werkzeug:_internal.py:97: 127.0.0.1 - - [18/May/2025 23:48:52] "[33mGET /apple-touch-icon-precomposed.png HTTP/1.1[0m" 404 -
+[2025-05-18 23:48:52,388] INFO:werkzeug:_internal.py:97: 127.0.0.1 - - [18/May/2025 23:48:52] "[33mGET /favicon.ico HTTP/1.1[0m" 404 -
+[2025-05-18 23:48:54,259] INFO:werkzeug:_internal.py:97: 127.0.0.1 - - [18/May/2025 23:48:54] "[33mGET /apple-touch-icon.png HTTP/1.1[0m" 404 -
+[2025-05-18 23:49:08,781] INFO:werkzeug:_internal.py:97: 127.0.0.1 - - [18/May/2025 23:49:08] "POST /login HTTP/1.1" 200 -
+[2025-05-18 23:49:09,683] INFO:werkzeug:_internal.py:97: 127.0.0.1 - - [18/May/2025 23:49:09] "[36mGET /static/style.css HTTP/1.1[0m" 304 -
+[2025-05-18 23:49:20,146] INFO:werkzeug:_internal.py:97: 127.0.0.1 - - [18/May/2025 23:49:20] "[32mPOST /login HTTP/1.1[0m" 302 -
+[2025-05-18 23:49:21,365] INFO:werkzeug:_internal.py:97: 127.0.0.1 - - [18/May/2025 23:49:21] "GET / HTTP/1.1" 200 -
+[2025-05-18 23:49:22,242] INFO:werkzeug:_internal.py:97: 127.0.0.1 - - [18/May/2025 23:49:22] "[36mGET /static/style.css HTTP/1.1[0m" 304 -
+[2025-05-18 23:49:40,694] INFO:werkzeug:_internal.py:97: 127.0.0.1 - - [18/May/2025 23:49:40] "[32mPOST / HTTP/1.1[0m" 302 -
+[2025-05-18 23:49:41,534] INFO:werkzeug:_internal.py:97: 127.0.0.1 - - [18/May/2025 23:49:41] "GET / HTTP/1.1" 200 -
+[2025-05-18 23:49:42,751] INFO:werkzeug:_internal.py:97: 127.0.0.1 - - [18/May/2025 23:49:42] "[36mGET /static/style.css HTTP/1.1[0m" 304 -

@@ -1,0 +1,28 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+requests = "*"
+redis = "*"
+python-telegram-bot = "*"
+openpyxl = "*"
+fastapi = "*"
+uvicorn = "*"
+python-multipart = "*"
+flask = "*"
+flask-login = "*"
+flask-wtf = "*"
+flask-bootstrap = "*"
+aiohttp = "*"
+python-dotenv = "*"
+pillow = "*"
+python-docx = "*"
+pypdf2 = "*"
+pandas = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.13"

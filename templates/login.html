@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Вход</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h2>Вход</h2>
+        <form method="POST">
+            {{ form.hidden_tag() }}
+            <label for="user_id">Ваш ID:</label>
+            {{ form.user_id(size=32) }}<br>
+            {{ form.submit() }}
+        </form>
+        {% for message in get_flashed_messages() %}
+            <div class="alert">{{ message }}</div>
+        {% endfor %}
+    </div>
+</body>
+</html>
