@@ -3,6 +3,7 @@ import os
 import PyPDF2
 import pandas as pd
 import docx
+import mimetypes
 import json
 import re
 from functools import wraps
@@ -935,12 +936,165 @@ async def draw_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Ошибка генерации изображения: {e}")
         await msg.edit_text("Ошибка при генерации изображения. Попробуйте позже.")
 
+async def create_vector_store_and_upload_file(session, file_bytes, file_name):
+    # 1. Создать vector store
+    url_vs = "https://api.proxyapi.ru/openai/v1/vector_stores"
+    headers = {
+        "Authorization": f"Bearer {PROXYAPI_KEY}",
+        "Content-Type": "application/json",
+        "OpenAI-Beta": "assistants=v2"
+    }
+    async with session.post(url_vs, headers=headers, json={}, timeout=30) as resp:
+        vs_data = await resp.json()
+    if "id" not in vs_data:
+        logger.error(f"Ошибка создания vector store: {json.dumps(vs_data, ensure_ascii=False)}")
+        raise Exception(f"Ошибка создания vector store: {vs_data.get('error', vs_data)}")
+    vector_store_id = vs_data["id"]
+
+    # 2. Загружаем файл в /files корректно!
+    url_files = "https://api.proxyapi.ru/openai/v1/files"
+    headers_files = {
+        "Authorization": f"Bearer {PROXYAPI_KEY}",
+        "OpenAI-Beta": "assistants=v2"
+    }
+    # Получаем mimetype (по желанию)
+    mime = mimetypes.guess_type(file_name)[0] or 'application/octet-stream'
+    data_files = aiohttp.FormData()
+    data_files.add_field(
+        'file',
+        BytesIO(file_bytes),            # ВАЖНО!
+        filename=file_name,
+        content_type=mime
+    )
+    data_files.add_field('purpose', 'assistants')
+    async with session.post(url_files, headers=headers_files, data=data_files, timeout=120) as resp:
+        file_obj = await resp.json()
+    if "id" not in file_obj:
+        logger.error(f"Ошибка загрузки файла: {json.dumps(file_obj, ensure_ascii=False)}")
+        raise Exception(f"Ошибка загрузки файла: {file_obj.get('error', file_obj)}")
+    file_id = file_obj["id"]
+
+    # 3. Привязываем file_id к vector_store
+    url_vs_files = f"https://api.proxyapi.ru/openai/v1/vector_stores/{vector_store_id}/files"
+    headers_vs_files = {
+        "Authorization": f"Bearer {PROXYAPI_KEY}",
+        "Content-Type": "application/json",
+        "OpenAI-Beta": "assistants=v2"
+    }
+    payload_vs_files = {"file_id": file_id}
+    async with session.post(url_vs_files, headers=headers_vs_files, json=payload_vs_files, timeout=30) as resp:
+        vs_file_obj = await resp.json()
+    if "id" not in vs_file_obj:
+        logger.error(f"Ошибка привязки файла к vector store: {json.dumps(vs_file_obj, ensure_ascii=False)}")
+        raise Exception(f"Ошибка привязки файла к vector store: {vs_file_obj.get('error', vs_file_obj)}")
+
+    return vector_store_id, file_id
+
+async def create_assistant(session, vector_store_id, model="gpt-4o", instructions=None):
+    url = "https://api.proxyapi.ru/openai/v1/assistants"
+    payload = {
+        "model": model,
+        "instructions": instructions or "Ты ассистент, помоги ответить на вопросы по прикреплённому файлу.",
+        "tools": [{"type": "file_search"}],
+        "tool_resources": {
+            "file_search": {
+                "vector_store_ids": [vector_store_id]
+            }
+        }
+    }
+    headers = {
+        "Authorization": f"Bearer {PROXYAPI_KEY}",
+        "Content-Type": "application/json",
+        "OpenAI-Beta": "assistants=v2"
+    }
+    async with session.post(url, headers=headers, json=payload, timeout=30) as resp:
+        data = await resp.json()
+    if "id" not in data:
+        logger.error(f"[ProxyAPI] Ошибка создания ассистента: {json.dumps(data, ensure_ascii=False)}")
+        raise Exception(f"Ошибка ProxyAPI (assistant): {data.get('error', data)}")
+    return data["id"]
+
+async def create_thread(session, user_message):
+    url = "https://api.proxyapi.ru/openai/v1/threads"
+    message = {
+        "role": "user",
+        "content": user_message,
+    }
+    payload = {
+        "messages": [message]
+    }
+    headers = {
+        "Authorization": f"Bearer {PROXYAPI_KEY}",
+        "Content-Type": "application/json",
+        "OpenAI-Beta": "assistants=v2"
+    }
+    async with session.post(url, headers=headers, json=payload, timeout=30) as resp:
+        data = await resp.json()
+    if "id" not in data:
+        logger.error(f"Ошибка при создании thread: {json.dumps(data, ensure_ascii=False)}")
+        raise Exception(f"Ошибка ProxyAPI (thread): {data.get('error', data)}")
+    return data["id"]
+
+async def run_thread(session, assistant_id, thread_id):
+    url = f"https://api.proxyapi.ru/openai/v1/threads/{thread_id}/runs"
+    payload = {"assistant_id": assistant_id}
+    headers = {
+        "Authorization": f"Bearer {PROXYAPI_KEY}",
+        "Content-Type": "application/json",
+        "OpenAI-Beta": "assistants=v2"
+    }
+    async with session.post(url, headers=headers, json=payload, timeout=30) as resp:
+        data = await resp.json()
+    if "id" not in data:
+        logger.error(f"Ошибка при запуске run: {json.dumps(data, ensure_ascii=False)}")
+        raise Exception(f"Ошибка ProxyAPI (run): {data.get('error', data)}")
+    return data["id"]
+
+async def wait_run_complete(session, thread_id, run_id, timeout=90):
+    url = f"https://api.proxyapi.ru/openai/v1/threads/{thread_id}/runs/{run_id}"
+    headers = {
+        "Authorization": f"Bearer {PROXYAPI_KEY}",
+        "OpenAI-Beta": "assistants=v2"
+    }
+    import asyncio
+    for _ in range(timeout // 2):
+        async with session.get(url, headers=headers, timeout=10) as resp:
+            data = await resp.json()
+            if "status" not in data:
+                logger.error(f"Ошибка ожидания завершения run: {json.dumps(data, ensure_ascii=False)}")
+                raise Exception(f"Ошибка ProxyAPI (run status): {data.get('error', data)}")
+            if data.get("status") in ("completed", "failed", "cancelled", "expired"):
+                return data.get("status")
+        await asyncio.sleep(2)
+    logger.error("Превышено время ожидания завершения run")
+    return "timeout"
+
+async def get_thread_response(session, thread_id):
+    url = f"https://api.proxyapi.ru/openai/v1/threads/{thread_id}/messages"
+    headers = {
+        "Authorization": f"Bearer {PROXYAPI_KEY}",
+        "OpenAI-Beta": "assistants=v2"
+    }
+    async with session.get(url, headers=headers, timeout=30) as resp:
+        data = await resp.json()
+    if "data" not in data:
+        logger.error(f"Ошибка получения сообщений thread: {json.dumps(data, ensure_ascii=False)}")
+        raise Exception(f"Ошибка ProxyAPI (get messages): {data.get('error', data)}")
+    msgs = data.get("data", [])
+    for msg in reversed(msgs):
+        if msg.get("role") == "assistant":
+            parts = msg.get("content", [])
+            for part in parts:
+                if part["type"] == "text":
+                    return part["text"]["value"]
+    logger.warning("Нет ответа ассистента в сообщениях thread")
+    return None
+
 @allowed_only
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    import asyncio
+    import traceback
 
     user = update.effective_user
-    user_id = user.id
     document = update.message.document
     file_name = document.file_name
     file_id = document.file_id
@@ -955,122 +1109,38 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Скачиваем файл
         tg_file = await context.bot.get_file(file_id)
         file_bytes = await tg_file.download_as_bytearray()
-
-        # Загружаем на ProxyAPI
-        url = "https://api.proxyapi.ru/openai/v1/files"
-        headers = {"Authorization": f"Bearer {PROXYAPI_KEY}"}
-        data = aiohttp.FormData()
-        data.add_field('file', file_bytes, filename=file_name)
-        data.add_field('purpose', 'assistants')
         async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, data=data, timeout=120) as resp:
-                if resp.status != 200:
-                    text = await resp.text()
-                    logger.error(f"Ошибка загрузки документа: {resp.status} {text}")
-                    await msg.edit_text(f"Ошибка при загрузке документа: {text}")
-                    return
-                j = await resp.json()
-        file_proxy_id = j.get("id")
-        if not file_proxy_id:
-            await msg.edit_text("Не удалось получить file_id документа от ProxyAPI.")
-            return
-
-        # Ожидаем индексации
-        await msg.edit_text(f"⏳ Индексирую документ для поиска по содержимому...")
-        is_ready = await wait_file_processed(file_proxy_id, timeout=60)
-        if not is_ready:
-            await msg.edit_text("Документ не был обработан вовремя. Попробуйте позже.")
-            return
-
-        # Формируем запрос к AI (если нет подписи - запрос на полный текст)
-        question = update.message.caption or (
-            "Покажи полный текст этого документа, выведи его слово в слово без пояснений. "
-            "Если это таблица — покажи её часть (первые строки)."
-        )
-        model = get_user_model(user_id)
-        chat_url = "https://api.proxyapi.ru/openai/v1/chat/completions"
-        chat_headers = {"Authorization": f"Bearer {PROXYAPI_KEY}", "Content-Type": "application/json"}
-        messages = [
-            SYSTEM_PROMPT,
-            {"role": "user", "content": question}
-        ]
-        chat_payload = {
-            "model": model,
-            "messages": messages,
-            "tools": [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "file_search"
-                    }
-                }
-            ],
-            "stream": True,
-        }
-
-        reply_text = ""
-        last_sent = ""
-        token_count = 0
-        has_updated_once = False
-
-        # Получаем только ответ от ProxyAPI и выводим его пользователю
-        async with aiohttp.ClientSession() as session:
-            async with session.post(chat_url, headers=chat_headers, json=chat_payload, timeout=180) as response:
-                if response.status != 200:
-                    text = await response.text()
-                    logger.error(f"Ошибка chat-completion для документа: {response.status} {text}")
-                    await msg.edit_text(f"Ошибка при анализе документа: {text}")
-                    return
-                async for line in response.content:
-                    if line:
-                        try:
-                            line = line.decode()
-                            if line.startswith('data:'):
-                                json_data = line[len('data:'):].strip()
-                                if json_data == '[DONE]':
-                                    break
-                                delta = json.loads(json_data)
-                                if 'choices' in delta and delta['choices']:
-                                    content = delta['choices'][0]['delta'].get('content', '')
-                                    if content:
-                                        reply_text += content
-                                        token_count += 1
-                                        if (token_count % 8 == 0 or len(reply_text) - len(last_sent) > 30) or not has_updated_once:
-                                            try:
-                                                await msg.edit_text(reply_text + " ▍")
-                                                last_sent = reply_text
-                                                has_updated_once = True
-                                            except Exception as e:
-                                                logger.warning(f"Ошибка при edit_text (doc): {e}")
-                        except Exception as e:
-                            logger.warning(f"Ошибка парсинга стрима (doc): {e}")
-
-        if reply_text.strip():
-            safe_text = markdown_code_to_html(reply_text)
-            await msg.edit_text(safe_text, parse_mode=ParseMode.HTML)
-            add_to_history(user_id, "assistant", reply_text)
-            logger.info(f'[Document] Ответ по документу {file_name} для {user_id}: {reply_text[:100]}...')
-        else:
-            await msg.edit_text("❗️AI не смог получить ответ по вашему документу. Возможно, файл не поддерживается или слишком сложен для анализа.")
+            # 1. Создаём vector store и загружаем файл
+            vector_store_id, _ = await create_vector_store_and_upload_file(session, file_bytes, file_name)
+            # 2. Создаём ассистента
+            assistant_id = await create_assistant(session, vector_store_id)
+            # 3. Создаём thread
+            question = update.message.caption or (
+                "Покажи полный текст этого документа, выведи его слово в слово без пояснений. "
+                "Если это таблица — покажи её часть (первые строки)."
+            )
+            thread_id = await create_thread(session, question)
+            # 4. Запускаем run
+            run_id = await run_thread(session, assistant_id, thread_id)
+            await msg.edit_text("✍️ Документ отправлен ассистенту, жду ответа...")
+            # 5. Ждём завершения run
+            status = await wait_run_complete(session, thread_id, run_id, timeout=90)
+            if status != "completed":
+                await msg.edit_text("❗️AI не смог обработать документ вовремя. Попробуйте позже.")
+                return
+            # 6. Получаем ответ ассистента
+            result = await get_thread_response(session, thread_id)
+            if result and result.strip():
+                safe_text = markdown_code_to_html(result)
+                await msg.edit_text(safe_text, parse_mode=ParseMode.HTML)
+                add_to_history(user.id, "assistant", result)
+                logger.info(f'[Document/AssistantsAPI] Ответ по документу {file_name} для {user.id}: {result[:100]}...')
+            else:
+                await msg.edit_text("❗️AI не смог получить ответ по вашему документу. Возможно, файл не поддерживается или слишком сложен для анализа.")
     except Exception as e:
-        logger.error(f"Ошибка при работе с документом: {e}")
-        await msg.edit_text("Ошибка при анализе документа. Попробуйте позже.")
-
-async def wait_file_processed(file_id, timeout=60):
-    url = f"https://api.proxyapi.ru/openai/v1/files/{file_id}"
-    headers = {"Authorization": f"Bearer {PROXYAPI_KEY}"}
-    import asyncio
-    for _ in range(timeout // 2):
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, timeout=10) as resp:
-                if resp.status != 200:
-                    return False
-                j = await resp.json()
-                status = j.get("status")
-                if status == "processed":
-                    return True
-        await asyncio.sleep(2)
-    return False
+        tb = traceback.format_exc()
+        logger.error(f"Ошибка при работе с документом (AssistantsAPI): {e!r}\n{tb}")
+        await msg.edit_text(f"Ошибка при анализе документа. Подробнее:\n<pre>{e!r}</pre>\nПопробуйте позже.", parse_mode=ParseMode.HTML)
 
 async def dochelp_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
