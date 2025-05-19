@@ -23,6 +23,14 @@ import base64
 from PIL import Image
 from io import BytesIO
 
+for logger_name in [
+    "httpx",
+    "urllib3",
+    "telegram",
+    "apscheduler",
+]:
+    logging.getLogger(logger_name).setLevel(logging.WARNING)
+
 # --- Загрузка переменных окружения ---
 load_dotenv()
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
