@@ -23,6 +23,9 @@ import base64
 from PIL import Image
 from io import BytesIO
 
+# Активные file-сессии: user_id -> dict с vector_store_id, assistant_id, thread_id, file_id, file_name
+ACTIVE_FILE_SESSIONS = {}
+
 for logger_name in [
     "httpx",
     "urllib3",
@@ -558,6 +561,7 @@ HELP_COMMANDS = [
     {"cmd": "/cancel", "desc": "Отменить текущий режим рассылки (для админов).", "admin": True},
     {"cmd": "/reloadmodels", "desc": "Обновить список доступных LLM моделей (админ-команда).", "admin": True},
     {"cmd": "/admin", "desc": "Открыть админ-панель управления и статистики.", "admin": True},
+    {"cmd": "/closefile", "desc": "Завершить работу с загруженным документом", "admin": False}
 ]
 
 HELP_USAGE = (
@@ -705,19 +709,22 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @allowed_only
 async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
-        "Список доступных команд:\n"
+        "<b>Список доступных команд:</b>\n"
+        "/start — начать работу с ботом\n"
+        "/help — справка и документация\n"
+        "/menu — это меню\n"
+        "/draw — сгенерировать картинку по описанию\n"
         "/model — выбрать модель LLM\n"
         "/reset — новый диалог (очистить историю)\n"
         "/export — выгрузить историю чата (txt-файл)\n"
+        "/dochelp — инструкция по работе с файлами\n"
+        "/closefile — закрыть активный документ\n"
         "/reloadmodels — обновить список моделей (админы)\n"
         "/admin — админ-панель (если доступна)\n"
-        "/broadcast — (админы) рассылка всем пользователям\n"
+        "/broadcast — рассылка всем пользователям (админы)\n"
         "/cancel — отменить рассылку\n"
-        "/help — справка и документация\n"
-        "/menu — это меню\n"
-        "/start — начало работы\n"
-        "…или просто начни диалог!\n"
-        "Можно отправлять фотографии и голосовые сообщения."
+        "— Можно отправлять фото и голосовые сообщения.\n"
+        "— Просто напишите любой вопрос!\n"
     )
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
@@ -860,6 +867,58 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = user.id
     prompt = update.message.text
 
+    # --- Если есть активный документ ---
+    if user_id in ACTIVE_FILE_SESSIONS:
+        session = ACTIVE_FILE_SESSIONS[user_id]
+        thread_id = session["thread_id"]
+        assistant_id = session["assistant_id"]
+        async with aiohttp.ClientSession() as session_http:
+            # Добавляем новый вопрос в thread
+            url_msg = f"https://api.proxyapi.ru/openai/v1/threads/{thread_id}/messages"
+            payload = {"role": "user", "content": prompt}
+            headers = {
+                "Authorization": f"Bearer {PROXYAPI_KEY}",
+                "Content-Type": "application/json",
+                "OpenAI-Beta": "assistants=v2"
+            }
+            async with session_http.post(url_msg, headers=headers, json=payload) as resp:
+                msg_data = await resp.json()
+                if "id" not in msg_data:
+                    await update.message.reply_text("Ошибка добавления вопроса к документу.")
+                    return
+            run_id = await run_thread(session_http, assistant_id, thread_id)
+            msg = await update.message.reply_text("✍️ Вопрос по документу отправлен, жду ответа...")
+            status = await wait_run_complete(session_http, thread_id, run_id)
+            if status != "completed":
+                await msg.edit_text("❗️AI не смог обработать документ вовремя. Попробуйте позже.")
+                return
+            result = await get_thread_response(session_http, thread_id)
+            if result and result.strip():
+                safe_text = markdown_code_to_html(result)
+                footer = "\n\n<i>Чтобы завершить работу с этим файлом, используйте команду /closefile</i>"
+                if len(safe_text) + len(footer) > 4000:
+                    safe_text = safe_text[:4000 - len(footer)]
+                safe_text += footer
+                if len(safe_text) > 4000:
+                    preview = safe_text[:4000]
+                    await msg.edit_text(
+                        preview + "\n\n<code>[Ответ слишком длинный, полный ответ во вложении]</code>",
+                        parse_mode=ParseMode.HTML
+                    )
+                    filename = "full_result.txt"
+                    with open(filename, "w", encoding="utf-8") as f:
+                        f.write(result)
+                    with open(filename, "rb") as f:
+                        await update.message.reply_document(f, filename=filename, caption="Полный ответ")
+                    os.remove(filename)
+                else:
+                    await msg.edit_text(safe_text, parse_mode=ParseMode.HTML)
+                add_to_history(user_id, "assistant", result)
+            else:
+                await msg.edit_text("❗️AI не смог получить ответ по вашему документу.")
+        return
+
+    # --- Обычный диалог, если нет активной file-сессии ---
     reply_ref = ""
     if update.message.reply_to_message:
         orig = update.message.reply_to_message
@@ -1099,56 +1158,132 @@ async def get_thread_response(session, thread_id):
     return None
 
 @allowed_only
+async def closefile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id in ACTIVE_FILE_SESSIONS:
+        ACTIVE_FILE_SESSIONS.pop(user_id, None)
+        await update.message.reply_text(
+            "Документ закрыт. Теперь ваши вопросы больше не будут связаны с файлом."
+        )
+    else:
+        await update.message.reply_text(
+            "Нет активного документа для закрытия."
+        )
+
+def xlsx_to_txt_bytes(file_bytes, file_name="file.xlsx", max_rows=50):
+    excel_io = BytesIO(file_bytes)
+    df = pd.read_excel(excel_io, engine='openpyxl')
+    # Обрезаем по максимуму строк (чтобы не переполнить контекст)
+    df = df.head(max_rows)
+    # Форматируем как таблицу (табами или пробелами)
+    txt = df.to_string(index=False)
+    return txt.encode('utf-8')
+
+SUPPORTED_EXTS = {
+    ".pdf", ".txt", ".csv", ".doc", ".docx", ".ppt", ".pptx",
+    ".epub", ".html", ".htm", ".md", ".json", ".rtf"
+}
+
+import os
+import pandas as pd
+from io import BytesIO
+
+SUPPORTED_EXTS = {
+    ".pdf", ".txt", ".doc", ".docx", ".ppt", ".pptx",
+    ".epub", ".html", ".htm", ".md", ".json", ".rtf"
+}
+
+MAX_TELEGRAM_MSG_LEN = 4000  # чуть меньше лимита
+
+def xlsx_to_txt_bytes(file_bytes, file_name="file.xlsx", max_rows=2000):
+    excel_io = BytesIO(file_bytes)
+    df = pd.read_excel(excel_io, engine='openpyxl')
+    df = df.head(max_rows)
+    txt = df.to_string(index=False)
+    return txt.encode('utf-8')
+
+@allowed_only
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     import traceback
 
     user = update.effective_user
+    user_id = user.id
     document = update.message.document
     file_name = document.file_name
     file_id = document.file_id
+    ext = os.path.splitext(file_name)[-1].lower()
 
-    if document.file_size > 20 * 1024 * 1024:
-        await update.message.reply_text("Файл слишком большой (максимум 20 МБ для документов).")
+    tg_file = await context.bot.get_file(file_id)
+    file_bytes = await tg_file.download_as_bytearray()
+
+    if ext == ".xlsx":
+        try:
+            file_bytes = xlsx_to_txt_bytes(file_bytes, file_name, max_rows=3000)
+            file_name = file_name.rsplit(".", 1)[0] + ".txt"
+            ext = ".txt"
+        except Exception as e:
+            await update.message.reply_text(f"Не удалось преобразовать Excel в TXT: {e}")
+            return
+
+    if ext not in SUPPORTED_EXTS:
+        await update.message.reply_text(
+            f"Формат файла <b>{ext}</b> не поддерживается для поиска по содержимому. "
+            "Поддерживаются форматы: PDF, DOCX, TXT, PPTX, EPUB, HTML, MD, JSON, RTF.",
+            parse_mode=ParseMode.HTML
+        )
+        return
+
+    if document.file_size > 40 * 1024 * 1024:  # увеличил лимит до 40 МБ
+        await update.message.reply_text("Файл слишком большой (максимум 40 МБ для документов).")
         return
 
     msg = await update.message.reply_text(f"📄 Загружаю и анализирую документ {file_name}...")
 
     try:
-        # Скачиваем файл
-        tg_file = await context.bot.get_file(file_id)
-        file_bytes = await tg_file.download_as_bytearray()
         async with aiohttp.ClientSession() as session:
-            # 1. Создаём vector store и загружаем файл
             vector_store_id, _ = await create_vector_store_and_upload_file(session, file_bytes, file_name)
-            # 2. Создаём ассистента
             assistant_id = await create_assistant(session, vector_store_id)
-            # 3. Создаём thread
-            question = update.message.caption or (
-                "Покажи полный текст этого документа, выведи его слово в слово без пояснений. "
-                "Если это таблица — покажи её часть (первые строки)."
-            )
+            question = update.message.caption.strip() if update.message.caption else "Документ загружен."
             thread_id = await create_thread(session, question)
-            # 4. Запускаем run
-            run_id = await run_thread(session, assistant_id, thread_id)
-            await msg.edit_text("✍️ Документ отправлен ассистенту, жду ответа...")
-            # 5. Ждём завершения run
-            status = await wait_run_complete(session, thread_id, run_id, timeout=90)
-            if status != "completed":
-                await msg.edit_text("❗️AI не смог обработать документ вовремя. Попробуйте позже.")
-                return
-            # 6. Получаем ответ ассистента
-            result = await get_thread_response(session, thread_id)
-            if result and result.strip():
-                safe_text = markdown_code_to_html(result)
-                await msg.edit_text(safe_text, parse_mode=ParseMode.HTML)
-                add_to_history(user.id, "assistant", result)
-                logger.info(f'[Document/AssistantsAPI] Ответ по документу {file_name} для {user.id}: {result[:100]}...')
+            ACTIVE_FILE_SESSIONS[user.id] = {
+                "vector_store_id": vector_store_id,
+                "assistant_id": assistant_id,
+                "thread_id": thread_id,
+                "file_id": file_id,
+                "file_name": file_name,
+            }
+            if update.message.caption and update.message.caption.strip():
+                # Был вопрос — сразу отвечаем
+                run_id = await run_thread(session, assistant_id, thread_id)
+                await msg.edit_text("✍️ Вопрос по документу отправлен, жду ответа...")
+                status = await wait_run_complete(session, thread_id, run_id)
+                if status != "completed":
+                    await msg.edit_text("❗️AI не смог обработать документ вовремя. Попробуйте позже.")
+                    return
+                result = await get_thread_response(session, thread_id)
+                if result and result.strip():
+                    safe_text = markdown_code_to_html(result)
+                    footer = "\n\n<i>Чтобы завершить работу с этим файлом, используйте команду /closefile</i>"
+                    if len(safe_text) + len(footer) > 4000:
+                        safe_text = safe_text[:4000 - len(footer)]
+                    safe_text += footer
+                    await msg.edit_text(safe_text, parse_mode=ParseMode.HTML)
+                    add_to_history(user_id, "assistant", result)
+                else:
+                    await msg.edit_text("❗️AI не смог получить ответ по вашему документу.")
             else:
-                await msg.edit_text("❗️AI не смог получить ответ по вашему документу. Возможно, файл не поддерживается или слишком сложен для анализа.")
+                await msg.edit_text(
+                    "Документ успешно загружен. Теперь вы можете задавать к нему вопросы обычными сообщениями.\n"
+                    "Чтобы закрыть файл — используйте /closefile"
+                )
+            logger.info(f'[Document/AssistantsAPI] Документ {file_name} для {user.id} успешно загружен.')
     except Exception as e:
         tb = traceback.format_exc()
         logger.error(f"Ошибка при работе с документом (AssistantsAPI): {e!r}\n{tb}")
-        await msg.edit_text(f"Ошибка при анализе документа. Подробнее:\n<pre>{e!r}</pre>\nПопробуйте позже.", parse_mode=ParseMode.HTML)
+        await msg.edit_text(
+            f"Ошибка при анализе документа. Подробнее:\n<pre>{e!r}</pre>\nПопробуйте позже.",
+            parse_mode=ParseMode.HTML
+        )
 
 async def dochelp_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
@@ -1179,6 +1314,7 @@ def main():
     app.add_handler(CommandHandler("cancel", cancel_command))
     app.add_handler(CommandHandler("draw", draw_command))
     app.add_handler(CommandHandler("dochelp", dochelp_command))
+    app.add_handler(CommandHandler("closefile", closefile_command))
     app.add_handler(CallbackQueryHandler(model_callback, pattern="set_model:"))
     app.add_handler(CallbackQueryHandler(admin_callback, pattern="admin:"))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
