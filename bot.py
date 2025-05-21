@@ -278,9 +278,20 @@ async def error_handler(update, context):
         await notify_admins(app, f"*Ошибка в боте:*\n```{error_text}```", only_first=True)
 
 def markdown_code_to_html(text):
+    # Блоки кода
     text = re.sub(r'```(?:\w+)?\n(.*?)```', lambda m: f"<pre>{m.group(1)}</pre>", text, flags=re.DOTALL)
     text = re.sub(r'`([^`]+?)`', r'<code>\1</code>', text)
     text = text.replace("```", "")
+
+    # Списки Markdown в •
+    text = re.sub(r"^\s*[-*]\s+", "• ", text, flags=re.MULTILINE)
+    # HTML списки в •
+    text = re.sub(r"<ul>|</ul>|<ol>|</ol>", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"<li>(.*?)</li>", r"• \1\n", text, flags=re.IGNORECASE|re.DOTALL)
+    # Убираем unsupported теги
+    text = re.sub(r"</?(span|table|tr|td|th|hr|br)[^>]*>", "", text, flags=re.IGNORECASE)
+    # Убираем любые другие неизвестные теги (опционально, только если очень нужно)
+    # text = re.sub(r"</?[a-z][^>]*>", "", text)
     return text
 
 async def download_and_encode_photo(bot, file_id, max_size=2 * 1024 * 1024):
