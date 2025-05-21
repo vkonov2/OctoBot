@@ -259,6 +259,28 @@ def get_broadcast_wait():
     except Exception:
         return None
 
+@admin_only
+async def broadcast_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    # Проверяем, ждет ли бот сообщение для рассылки именно от этого админа
+    if get_broadcast_wait() == user_id:
+        message = update.message.text
+        clear_broadcast_wait()
+        # Собираем id всех пользователей с историей (можно по логике своей базы)
+        all_user_ids = [int(filename[len("history_"):-len(".json")])
+                        for filename in os.listdir(HISTORY_DIR)
+                        if filename.startswith("history_") and filename.endswith(".json")]
+        sent = 0
+        for uid in all_user_ids:
+            try:
+                await context.bot.send_message(uid, message, parse_mode=ParseMode.HTML)
+                sent += 1
+            except Exception as e:
+                logger.warning(f"Не удалось отправить сообщение {uid}: {e}")
+        await update.message.reply_text(f"Сообщение отправлено {sent} пользователям.", parse_mode=ParseMode.HTML)
+        return True  # обработано
+    return False  # не было рассылки, обычная логика
+
 async def notify_admins(application, text, only_first=True):
     for admin_id in ADMIN_USER_IDS:
         try:
@@ -1330,6 +1352,8 @@ def main():
     app.add_handler(CallbackQueryHandler(admin_callback, pattern="admin:"))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, broadcast_text_handler), group=0)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message), group=1)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_error_handler(error_handler)
