@@ -6,6 +6,7 @@ import docx
 import mimetypes
 import json
 import re
+import time
 from functools import wraps
 from dotenv import load_dotenv
 from telegram import (
@@ -15,8 +16,9 @@ from telegram import (
 from telegram.constants import ParseMode
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler,
-    filters, ContextTypes, CallbackQueryHandler
+    filters, ContextTypes, CallbackQueryHandler, ConversationHandler
 )
+from telegram.error import RetryAfter
 import aiohttp
 import asyncio
 import base64
@@ -60,6 +62,54 @@ logger = logging.getLogger(__name__)
 HISTORY_DIR = "history"
 os.makedirs(HISTORY_DIR, exist_ok=True)
 HISTORY_MAX_PAIRS = 40
+BROADCAST = 10
+
+async def safe_edit_text(msg, *args, **kwargs):
+    # Кастомная обёртка для edit_text с обработкой FloodWait
+    while True:
+        try:
+            return await msg.edit_text(*args, **kwargs)
+        except RetryAfter as e:
+            logger.warning(f"Flood control: ждём {e.retry_after} сек")
+            await asyncio.sleep(e.retry_after)
+        except Exception as e:
+            logger.warning(f"Ошибка при edit_text: {e}")
+            break  # Можно не retry, если это другая ошибка
+
+async def stream_with_rate_limit(msg, content_iter, postprocess=None, finish=None, min_interval=2.0):
+    last_edit_time = 0
+    reply_text = ""
+    last_sent = ""
+    token_count = 0
+    has_updated_once = False
+
+    async for chunk in content_iter:
+        if 'choices' in chunk and chunk['choices']:
+            delta = chunk['choices'][0]['delta']
+            content = delta.get('content', '')
+            if content:
+                reply_text += content
+                token_count += 1
+
+                # Только если прошло min_interval секунд с прошлого edit_text
+                now = time.monotonic()
+                if ((now - last_edit_time > min_interval) and (len(reply_text) - len(last_sent) > 20)) or not has_updated_once:
+                    try:
+                        await safe_edit_text(msg, reply_text + " ▍")
+                        last_sent = reply_text
+                        last_edit_time = now
+                        has_updated_once = True
+                    except Exception as e:
+                        logger.warning(f"Ошибка при edit_text: {e}\nОтвет: {reply_text}")
+
+    # После окончания стрима — финальное сообщение
+    if postprocess:
+        safe_text = postprocess(reply_text)
+    else:
+        safe_text = reply_text
+    await safe_edit_text(msg, safe_text)
+    if finish:
+        await finish()
 
 def _history_path(user_id):
     return os.path.join(HISTORY_DIR, f"history_{user_id}.json")
@@ -423,6 +473,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     last_sent = ""
     token_count = 0
     has_updated_once = False
+    last_edit_time = 0
 
     try:
         async for chunk in ask_llm_stream_history_vision(history, vision_model):
@@ -432,10 +483,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if content:
                     reply_text += content
                     token_count += 1
-                    if (token_count % 8 == 0 or len(reply_text) - len(last_sent) > 30) or not has_updated_once:
+
+                    now = time.monotonic()
+                    if ((now - last_edit_time > 2.5) and (len(reply_text) - len(last_sent) > 20)) or not has_updated_once:
                         try:
                             await msg.edit_text(reply_text + " ▍")
                             last_sent = reply_text
+                            last_edit_time = now
                             has_updated_once = True
                         except Exception as e:
                             logger.warning(f"Ошибка при edit_text: {e}\nОтвет: {reply_text}")
@@ -445,7 +499,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f'[Vision] Готовый ответ пользователю {user_id}: {reply_text[:100]}...')
     except Exception:
         await msg.edit_text("Ошибка при обработке изображения. Попробуйте позже.")
-
 
 @allowed_only
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -488,6 +541,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         last_sent = ""
         token_count = 0
         has_updated_once = False
+        last_edit_time = 0
 
         await msg.edit_text("✍️ Генерирую ответ...")
 
@@ -498,10 +552,13 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if content:
                     reply_text += content
                     token_count += 1
-                    if (token_count % 8 == 0 or len(reply_text) - len(last_sent) > 30) or not has_updated_once:
+
+                    now = time.monotonic()
+                    if ((now - last_edit_time > 2.5) and (len(reply_text) - len(last_sent) > 20)) or not has_updated_once:
                         try:
                             await msg.edit_text(reply_text + " ▍")
                             last_sent = reply_text
+                            last_edit_time = now
                             has_updated_once = True
                         except Exception as e:
                             logger.warning(f"Ошибка при edit_text: {e}\nОтвет: {reply_text}")
@@ -512,7 +569,6 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Ошибка при обработке голосового: {e}")
         await msg.edit_text("Ошибка при расшифровке/ответе на голосовое сообщение.")
-
 
 async def ask_llm_stream_history(history, model):
     full_history = [SYSTEM_PROMPT] + history
@@ -712,19 +768,33 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @admin_only
 async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    set_broadcast_wait(update.effective_user.id)
     await update.message.reply_text(
-        "Введите сообщение для рассылки всем пользователям (или /cancel для отмены).", parse_mode=ParseMode.HTML
+        "Введите сообщение для рассылки всем пользователям (или /cancel для отмены).",
+        parse_mode=ParseMode.HTML
     )
+    return BROADCAST  # переходим в состояние ожидания текста
 
 @admin_only
-async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    waiting_admin = get_broadcast_wait()
-    if waiting_admin == update.effective_user.id:
-        clear_broadcast_wait()
-        await update.message.reply_text("Режим рассылки отменён.", parse_mode=ParseMode.HTML)
-    else:
-        await update.message.reply_text("Нет активного режима рассылки.", parse_mode=ParseMode.HTML)
+async def broadcast_text_fsm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.message.text
+    # Собираем id всех пользователей с историей
+    all_user_ids = [int(filename[len("history_"):-len(".json")])
+                    for filename in os.listdir(HISTORY_DIR)
+                    if filename.startswith("history_") and filename.endswith(".json")]
+    sent = 0
+    for uid in all_user_ids:
+        try:
+            await context.bot.send_message(uid, message, parse_mode=ParseMode.HTML)
+            sent += 1
+        except Exception as e:
+            logger.warning(f"Не удалось отправить сообщение {uid}: {e}")
+    await update.message.reply_text(f"Сообщение отправлено {sent} пользователям.", parse_mode=ParseMode.HTML)
+    return ConversationHandler.END
+
+@admin_only
+async def broadcast_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Режим рассылки отменён.", parse_mode=ParseMode.HTML)
+    return ConversationHandler.END
 
 @allowed_only
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -906,7 +976,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         thread_id = session["thread_id"]
         assistant_id = session["assistant_id"]
         async with aiohttp.ClientSession() as session_http:
-            # Добавляем новый вопрос в thread
             url_msg = f"https://api.proxyapi.ru/openai/v1/threads/{thread_id}/messages"
             payload = {"role": "user", "content": prompt}
             headers = {
@@ -973,6 +1042,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     last_sent = ""
     token_count = 0
     has_updated_once = False
+    last_edit_time = 0
 
     try:
         async for chunk in ask_llm_stream_history(history, model):
@@ -982,10 +1052,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if content:
                     reply_text += content
                     token_count += 1
-                    if (token_count % 8 == 0 or len(reply_text) - len(last_sent) > 30) or not has_updated_once:
+
+                    now = time.monotonic()
+                    if ((now - last_edit_time > 2.5) and (len(reply_text) - len(last_sent) > 20)) or not has_updated_once:
                         try:
                             await msg.edit_text(reply_text + " ▍")
                             last_sent = reply_text
+                            last_edit_time = now
                             has_updated_once = True
                         except Exception as e:
                             logger.warning(f"Ошибка при edit_text: {e}\nОтвет: {reply_text}")
@@ -1335,6 +1408,20 @@ def main():
     loop = asyncio.get_event_loop()
     loop.run_until_complete(reload_models())
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+
+    broadcast_conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("broadcast", broadcast_command)],
+        states={
+            BROADCAST: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, broadcast_text_fsm),
+                CommandHandler("cancel", broadcast_cancel)
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", broadcast_cancel)],
+        allow_reentry=True,
+    )
+
+    app.add_handler(broadcast_conv_handler)
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("menu", menu_command))
     app.add_handler(CommandHandler("help", help_command))
@@ -1343,8 +1430,6 @@ def main():
     app.add_handler(CommandHandler("reloadmodels", reloadmodels_command))
     app.add_handler(CommandHandler("reset", reset_command))
     app.add_handler(CommandHandler("export", export_command))
-    app.add_handler(CommandHandler("broadcast", broadcast_command))
-    app.add_handler(CommandHandler("cancel", cancel_command))
     app.add_handler(CommandHandler("draw", draw_command))
     app.add_handler(CommandHandler("dochelp", dochelp_command))
     app.add_handler(CommandHandler("closefile", closefile_command))
@@ -1352,8 +1437,6 @@ def main():
     app.add_handler(CallbackQueryHandler(admin_callback, pattern="admin:"))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, broadcast_text_handler), group=0)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message), group=1)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_error_handler(error_handler)
