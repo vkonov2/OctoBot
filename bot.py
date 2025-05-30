@@ -367,34 +367,49 @@ async def error_handler(update, context):
 #     return text
 
 def markdown_code_to_html(text):
-    # --- Преобразование markdown кода в HTML ---
-    # Блоки кода
+    # Блоки кода (```...```) -> <pre>...</pre>
     text = re.sub(r'```(?:\w+)?\n(.*?)```', lambda m: f"<pre>{m.group(1)}</pre>", text, flags=re.DOTALL)
-    # Инлайновый код
+    # Инлайн-код `...` -> <code>...</code>
     text = re.sub(r'`([^`]+?)`', r'<code>\1</code>', text)
-    # Обычные маркдаун-списки в точки
+    # Переводим markdown-списки и html-списки в точки
     text = re.sub(r"^\s*[-*]\s+", "• ", text, flags=re.MULTILINE)
-    # HTML списки в точки
     text = re.sub(r"<ul>|</ul>|<ol>|</ol>", "", text, flags=re.IGNORECASE)
     text = re.sub(r"<li>(.*?)</li>", r"• \1\n", text, flags=re.IGNORECASE|re.DOTALL)
-
-    # Удаляем явно все потенциально опасные и неподдерживаемые теги (например, stop, span, div, img, и любые кроме разрешённых)
-    allowed_tags = ['b', 'i', 'u', 's', 'code', 'pre', 'a']
-    # Сначала удаляем все явно запрещённые теги (можно расширить список)
+    # Удаляем явно неподдерживаемые теги (span, stop, div, и т.д.)
     text = re.sub(r"</?(span|stop|div|font|table|tr|td|th|hr|br|img|h\d|figure|figcaption)[^>]*>", "", text, flags=re.IGNORECASE)
-
-    # Затем удаляем все остальные неизвестные теги, которые не входят в белый список
+    allowed_tags = {'b', 'i', 'u', 's', 'code', 'pre', 'a'}
+    # Удаляем все остальные неизвестные теги, которые не входят в белый список
     def remove_unsupported_tags(match):
         tag = match.group(1).lower()
         if tag in allowed_tags:
             return match.group(0)
         return ""
-    # Открывающие и закрывающие теги
     text = re.sub(r"</?([a-zA-Z0-9]+)(\s[^>]*)?>", remove_unsupported_tags, text)
-
-    # Экранируем незакрытые угловые скобки (на всякий случай)
+    # Исправляем вложенность: не должно быть <pre><code>...</code></pre>
+    # Убираем <code> внутри <pre>
+    text = re.sub(r"<pre>(.*?)</pre>", lambda m: "<pre>{}</pre>".format(re.sub(r"</?code>", "", m.group(1))), text, flags=re.DOTALL)
+    # Убираем <pre> внутри <code>
+    text = re.sub(r"<code>(.*?)</code>", lambda m: "<code>{}</code>".format(re.sub(r"</?pre>", "", m.group(1))), text, flags=re.DOTALL)
+    # Удаляем незакрытые/сиротские <code> и <pre>
+    # Считаем количество открывающих и закрывающих тегов
+    for tag in ['code', 'pre']:
+        open_count = len(re.findall(f"<{tag}>", text))
+        close_count = len(re.findall(f"</{tag}>", text))
+        # Если открывающих больше — добавим закрывающие в конец
+        if open_count > close_count:
+            text += f"</{tag}>" * (open_count - close_count)
+        # Если закрывающих больше — убираем лишние
+        elif close_count > open_count:
+            text = re.sub(f"</{tag}>", "", text, count=close_count - open_count)
+    # Telegram не любит вложенные одинаковые теги (например, <code><code>...</code></code>)
+    text = re.sub(r"(<code>)+", "<code>", text)
+    text = re.sub(r"(</code>)+", "</code>", text)
+    text = re.sub(r"(<pre>)+", "<pre>", text)
+    text = re.sub(r"(</pre>)+", "</pre>", text)
+    # Экранируем незакрытые угловые скобки (очень редко, но полезно)
     text = text.replace('< ', '&lt; ').replace(' >', ' &gt;')
-
+    # Telegram не разрешает слишком длинные строки в <pre> (длинные без переносов), ставим переносы:
+    text = re.sub(r"(<pre>)(.*?)(</pre>)", lambda m: m.group(1) + re.sub(r"(.{150})", r"\1\n", m.group(2)) + m.group(3), text, flags=re.DOTALL)
     return text
 
 async def download_and_encode_photo(bot, file_id, max_size=2 * 1024 * 1024):
