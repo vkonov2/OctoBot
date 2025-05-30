@@ -349,21 +349,52 @@ async def error_handler(update, context):
     if app:
         await notify_admins(app, f"*Ошибка в боте:*\n```{error_text}```", only_first=True)
 
+# def markdown_code_to_html(text):
+#     # Блоки кода
+#     text = re.sub(r'```(?:\w+)?\n(.*?)```', lambda m: f"<pre>{m.group(1)}</pre>", text, flags=re.DOTALL)
+#     text = re.sub(r'`([^`]+?)`', r'<code>\1</code>', text)
+#     text = text.replace("```", "")
+
+#     # Списки Markdown в •
+#     text = re.sub(r"^\s*[-*]\s+", "• ", text, flags=re.MULTILINE)
+#     # HTML списки в •
+#     text = re.sub(r"<ul>|</ul>|<ol>|</ol>", "", text, flags=re.IGNORECASE)
+#     text = re.sub(r"<li>(.*?)</li>", r"• \1\n", text, flags=re.IGNORECASE|re.DOTALL)
+#     # Убираем unsupported теги
+#     text = re.sub(r"</?(span|table|tr|td|th|hr|br)[^>]*>", "", text, flags=re.IGNORECASE)
+#     # Убираем любые другие неизвестные теги (опционально, только если очень нужно)
+#     # text = re.sub(r"</?[a-z][^>]*>", "", text)
+#     return text
+
 def markdown_code_to_html(text):
+    # --- Преобразование markdown кода в HTML ---
     # Блоки кода
     text = re.sub(r'```(?:\w+)?\n(.*?)```', lambda m: f"<pre>{m.group(1)}</pre>", text, flags=re.DOTALL)
+    # Инлайновый код
     text = re.sub(r'`([^`]+?)`', r'<code>\1</code>', text)
-    text = text.replace("```", "")
-
-    # Списки Markdown в •
+    # Обычные маркдаун-списки в точки
     text = re.sub(r"^\s*[-*]\s+", "• ", text, flags=re.MULTILINE)
-    # HTML списки в •
+    # HTML списки в точки
     text = re.sub(r"<ul>|</ul>|<ol>|</ol>", "", text, flags=re.IGNORECASE)
     text = re.sub(r"<li>(.*?)</li>", r"• \1\n", text, flags=re.IGNORECASE|re.DOTALL)
-    # Убираем unsupported теги
-    text = re.sub(r"</?(span|table|tr|td|th|hr|br)[^>]*>", "", text, flags=re.IGNORECASE)
-    # Убираем любые другие неизвестные теги (опционально, только если очень нужно)
-    # text = re.sub(r"</?[a-z][^>]*>", "", text)
+
+    # Удаляем явно все потенциально опасные и неподдерживаемые теги (например, stop, span, div, img, и любые кроме разрешённых)
+    allowed_tags = ['b', 'i', 'u', 's', 'code', 'pre', 'a']
+    # Сначала удаляем все явно запрещённые теги (можно расширить список)
+    text = re.sub(r"</?(span|stop|div|font|table|tr|td|th|hr|br|img|h\d|figure|figcaption)[^>]*>", "", text, flags=re.IGNORECASE)
+
+    # Затем удаляем все остальные неизвестные теги, которые не входят в белый список
+    def remove_unsupported_tags(match):
+        tag = match.group(1).lower()
+        if tag in allowed_tags:
+            return match.group(0)
+        return ""
+    # Открывающие и закрывающие теги
+    text = re.sub(r"</?([a-zA-Z0-9]+)(\s[^>]*)?>", remove_unsupported_tags, text)
+
+    # Экранируем незакрытые угловые скобки (на всякий случай)
+    text = text.replace('< ', '&lt; ').replace(' >', ' &gt;')
+
     return text
 
 async def download_and_encode_photo(bot, file_id, max_size=2 * 1024 * 1024):
